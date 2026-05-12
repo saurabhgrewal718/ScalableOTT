@@ -8,8 +8,11 @@
         "start:web": "node src/app.js",
         "start:worker": "node src/worker.js",
         "dev": "node --watch src/app.js",
+        "dev:worker": "node --watch src/worker.js",
         "start:mock": "USE_MOCK_QUEUE=true node src/app.js",
-        "dev:mock": "USE_MOCK_QUEUE=true node --watch src/app.js"
+        "dev:mock": "USE_MOCK_QUEUE=true node --watch src/app.js",
+        "lint": "eslint src/",
+        "test": "echo 'No tests yet — add Jest' && exit 1"
     },
     "dependencies": {
         "@bull-board/api": "^7.0.0",

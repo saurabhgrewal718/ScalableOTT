@@ -2,15 +2,16 @@
 
 class WatchService {
   constructor(watchRepo, heartbeatBuffer) {
-    this.watchRepo = watchRepo;
+    this.watchRepo       = watchRepo;
     this.heartbeatBuffer = heartbeatBuffer;
   }
 
   async trackProgress({ userId, contentId, watchedSeconds, sessionId }) {
-    // 1. Instant update in DB (Aggregated later)
-    await this.watchRepo.upsertWatchProgress({ userId, contentId, watchedSeconds, sessionId });
-
-    // 2. Add to Write-Behind Buffer (High-Scale)
+    // Write-behind pattern: buffer the heartbeat in Redis only.
+    // The HeartbeatWorker drains the buffer on a periodic flush interval
+    // and persists to the DB in bulk — this is the entire point of the
+    // buffer. Writing directly to the DB here as well would double the
+    // write load and defeat the purpose of the pattern.
     await this.heartbeatBuffer.record({ userId, contentId, watchedSeconds, sessionId });
 
     return { status: 'buffered' };

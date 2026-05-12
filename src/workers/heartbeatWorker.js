@@ -2,8 +2,8 @@
 
 class HeartbeatWorker {
   constructor(queueManager, analyticsClient, watchRepo) {
-    this.QUEUE_NAME   = 'heartbeat_saver_queue';
-    this.queueManager = queueManager;
+    this.QUEUE_NAME      = 'heartbeat_saver_queue';
+    this.queueManager    = queueManager;
     this.analyticsClient = analyticsClient;
     this.watchRepo       = watchRepo;
   }
@@ -18,17 +18,22 @@ class HeartbeatWorker {
 
   async process(job) {
     const { events } = job.data;
-    
+
     console.log(`[HeartbeatWorker] Processing batch of ${events.length} heartbeats`);
 
-    for (const event of events) {
-      await this.watchRepo.upsertWatchProgress({
-        userId:         event.userId, 
-        contentId:      event.contentId, 
-        watchedSeconds: event.watchedSeconds,
-        sessionId:      event.sessionId
-      });
-    }
+    // Persist all heartbeat records concurrently — they are fully independent
+    // of each other. A for-await loop would serialize them and multiply latency
+    // by the batch size with zero benefit.
+    await Promise.all(
+      events.map((event) =>
+        this.watchRepo.upsertWatchProgress({
+          userId:         event.userId,
+          contentId:      event.contentId,
+          watchedSeconds: event.watchedSeconds,
+          sessionId:      event.sessionId,
+        })
+      )
+    );
 
     await this.analyticsClient.sendBatch(events);
   }

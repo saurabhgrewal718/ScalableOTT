@@ -3,14 +3,24 @@ require('dotenv').config();
 
 const container = require('./container');
 
-console.log('[WorkerProcess] Starting all background workers...');
+/**
+ * Entry point for the background worker process.
+ * Wrapped in an async main() so startup errors surface as
+ * explicit failures rather than silent unhandled rejections.
+ */
+async function main() {
+  console.log('[WorkerProcess] Starting all background workers...');
+  await container.startWorker();
+  console.log('[WorkerProcess] Workers are now listening for jobs.');
+}
 
-// Start the workers via the container
-container.startWorker();
+main().catch((err) => {
+  console.error('[WorkerProcess] Fatal startup error:', err);
+  process.exit(1);
+});
 
-console.log('[WorkerProcess] Workers are now listening for jobs.');
+// ─── Graceful Shutdown ───────────────────────────────────────────────────────
 
-// Graceful Shutdown for Worker Process
 async function shutdown() {
   console.log('[WorkerProcess] shutting down...');
   await container.shutdown();

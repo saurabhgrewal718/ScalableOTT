@@ -1,6 +1,6 @@
 'use strict';
 
-const { retryWithBackoff }  = require('../infra/retryWithBackoff');
+const { retryWithBackoff } = require('../infra/retryWithBackoff');
 const { simulateNetwork } = require('../utils/simulation');
 
 class EmailClient {

@@ -7,7 +7,7 @@
  *
  * Delay formula (per attempt i, 1-indexed):
  *   base = baseDelayMs * factor^(i-1)
- *   jitter = random(0, base * 0.3)       ← prevents thundering-herd
+ *   jitter = random(0, base * 0.5)       ← half-jitter, prevents thundering-herd
  *   actual delay = Math.min(base + jitter, maxDelayMs)
  *
  * @param {() => Promise<any>} fn           - The async operation to retry.
