@@ -1,0 +1,60 @@
+# Technical Roadmap: Scaling to 10M+ Users
+This document outlines the architectural evolution required to move the background workers from a "Functional Prototype" to a "Global Scale Distribution."
+
+## 1. Move to "Worker-per-Queue" Architecture
+Currently, all workers run in a single process. For 10M users, we must decouple them.
+*   **The Change**: Modify `src/worker.js` to accept a `TARGET_QUEUE` environment variable.
+const queueName = process.env.TARGET_QUEUE; // Passed from the environment
+Eg: 
+if (!queueName) {
+  // Default: Start everything (for local development)
+  container.startWorker(); 
+} else {
+  // Start ONLY the worker we need
+  const worker = container.getWorkerByName(queueName);
+  worker.start();
+}
+*   **The Benefit**: Allows us to scale the `EmailWorker` (slow, high volume) to 100 instances while keeping the `RevenueWorker` (critical, low volume) at 2 instances. So in case if i need to scale Email independetly i can do that. 
+
+## 2. Implement Worker-Level Concurrency
+*   **The Change**: Update the `QueueManager.createWorker()` to accept a `concurrency` setting.
+*   **The Benefit**: Node.js is excellent at handling multiple I/O operations. We can process 50 emails simultaneously on a single worker rather than 1-by-1, increasing throughput by 5000%.
+We can change the concurreny for different works at different rates, email can have a concurrency of 50 while revenue can have a concurrency of 10.
+createWorker(queueName, processor, options = {}) {
+  return new Worker(queueName, processor, { 
+    connection: this.connection,
+    concurrency: options.concurrency || 1 // <-- This is the magic line
+  });
+}
+
+## 3. Strict Timeouts & Circuit Breakers
+*   **The Change**: Every `process()` function must have a hard timeout (e.g., 10 seconds).
+*   **The Benefit**: Prevents "Zombie Workers." If the CRM API hangs, the worker should fail the job after 10s and move to the next one, rather than staying stuck forever.
+Currently we are not controlling that, the process can go on a long time.
+
+## 4. Idempotency Keys (The "Financial Guard") to the third party
+*   **The Change**: Pass a unique `idempotency-key` (like `purchaseId`) to all external clients.
+*   **The Benefit**: Guarantees that even if a worker retries a job 5 times, the user is only charged once and the email is only sent once. This is essential for data correctness.
+
+## 5. Dead Letter Queues (DLQ) & Manual Replay
+*   **The Change**: Configure BullMQ to move jobs to a "Dead Letter" queue after 3 failed retries. Currently we are keeping it only in the failed one.
+*   **The Benefit**: Instead of losing data, failing jobs are "quarantined." Engineers can fix the bug, update the data, and "Replay" the failed jobs without losing a single transaction.
+
+## 6. External Rate Limiting (Self-Preservation)
+*   **The Change**: Implement a "Token Bucket" or "Sliding Window" rate limiter inside the Workers.
+*   **The Benefit**: Ensures that our 100 workers don't accidentally DDoS our own Analytics API or get our IP blocked by the Push Notification provider.
+
+
+## 7. Observability (The "Eyes and Ears")
+*   **The Change**: Integrate OpenTelemetry.
+*   **The Benefit**: You can trace a single user's "Signup" from the moment they click the API → the database write → the Redis queue → the Worker → the external API call. If it fails at the 2-second mark, you know exactly which line of code caused it.
+
+## 8. Health Checks (Liveness & Readiness)
+*   **The Change**: Expose `/health/live` and `/health/ready` endpoints on the worker server.
+*   **The Benefit**: Kubernetes/Docker can automatically restart "stale" workers. If a worker has been running for 24 hours but has processed 0 jobs (maybe it got stuck on a bad job), the health check detects this and kills it, allowing a fresh worker to take over.
+
+## 9. Database Connection Pooling (Critical)
+*   **The Change**: Ensure your `DatabaseService` uses a connection pool with a `max` setting. Currently we are not using any DB but in case if we are this can be used.
+*   **The Benefit**: With 50 concurrent workers hammering the database, you must limit the connections. If you allow 100 workers to open 100 connections each, you will crash your database server. The pool acts as a "gatekeeper."
+
+
