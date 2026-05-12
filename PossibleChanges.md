@@ -279,3 +279,13 @@ Background workers that call external payment gateways (Revenue Worker) are vuln
 - **Zero Double-Charging**: Even in catastrophic failure scenarios, the system is mathematically guaranteed to only process a payment once.
 - **Worker Availability**: By cutting off slow requests, we ensure that a single slow partner doesn't take down our entire background processing fleet.
 - **Resilient Recovery**: Failed jobs are retried automatically, but safely, allowing the system to "catch up" once the third-party gateway recovers.
+
+---
+
+## 20. The "Redis Connection" Bottleneck
+
+**The Smell**: In `container.js`, we create one `ioredis` instance and share it across everything (Queues, Workers, and the Heartbeat Buffer).
+
+**The Problem**: BullMQ documentation explicitly states that you should **never** share the same Redis connection between a `Queue` and a `Worker`. The Worker uses blocking commands (like `BRPOPLPUSH`) that can "lock" the connection, preventing the Queue from adding new jobs and causing latency spikes.
+
+**The Professional Fix**: Refactor `QueueManager` to create separate Redis connections for "Producers" (Queues) and "Consumers" (Workers).
