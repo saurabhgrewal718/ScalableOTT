@@ -198,3 +198,24 @@ Infrastructure-level metadata (like `platform` and `deviceToken`) was originally
 - **Cleaner Data Model**: The request body now only contains relevant business data (Email, Name, PlanId).
 - **Resilience**: The system is now immune to "Network Retries." If a client spams the Signup button, they only get one email and one account.
 - **Observability**: Using standard headers makes it easy to log and trace request context globally via middleware without modifying every individual controller.
+
+---
+
+## 16. API Versioning Strategy
+
+**The Problem:**
+As the platform evolves, we will inevitably need to change the data structures of our APIs. Without versioning, a change to the `User` model would instantly break all older versions of the mobile app currently installed on millions of devices.
+
+**The Proposed Strategy:**
+1.  **Major Versions (URI-based)**: Use `/v1`, `/v2` prefixes for structural breaking changes. 
+    - `/v1/purchase/complete`
+    - `/v2/purchase/complete` (e.g., if we move from a single `amount` to a complex `priceComponents` object).
+2.  **Minor Versions (Header-based)**: Use a `X-API-Version` header for behavioral changes that are backwards-compatible but require a different logic branch.
+3.  **Transformation Layer (Stripe Model)**: For the ultimate scale, implement a **"Version Gate"** middleware. 
+    - Instead of duplicating code for `v1` and `v2`, the middleware "upcasts" a `v1` request into a `v2` format before it hits the controller.
+    - This allows the core business logic to always work with the "Latest" version while maintaining support for legacy clients.
+
+**The Benefit:**
+- **Zero Downtime**: We can deploy new features without forcing users to update their apps immediately.
+- **Developer Experience**: Clear versioning allows third-party developers to build on our platform with confidence that their integration won't break tomorrow.
+- **Graceful Deprecation**: We can monitor header usage to see exactly how many users are still on `v1` before we decide to sunset it.
