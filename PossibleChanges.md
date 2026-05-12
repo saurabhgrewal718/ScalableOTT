@@ -135,3 +135,31 @@ await this.heartbeatBuffer.record({ userId, contentId, watchedSeconds, sessionId
 **The Trade-off (accepted):** There is a data-loss window of up to `HEARTBEAT_FLUSH_INTERVAL_MS` (10 seconds) if the web server crashes before a flush. This is intentional and acceptable for watch progress — nobody cares if resume position is 10 seconds stale after a crash. It would **not** be acceptable for purchases or user records, which is why those write directly to the DB.
 
 **The Rule:** Pick one write strategy and commit to it. Never mix a write-behind buffer with a direct DB write for the same record — you get double the load with none of the benefit.
+
+---
+
+## 13. Resolved Code Anti-Patterns
+
+The following "basic" industry-standard mistakes were identified and resolved to bring the codebase up to senior/staff-level engineering standards:
+
+### A. Magic Strings (Lack of Centralized Constants)
+- **Problem**: Queue names and domain event names were hardcoded string literals (e.g., `'analytics_events'`) scattered across 16+ files.
+- **Risk**: A typo in one file would silently break the connection between an enqueuer and a worker.
+- **Fix**: Centralized everything into `src/infra/constants.js`. All code now refers to `QUEUES.ANALYTICS` or `EVENTS.USER_SIGNUP`.
+
+### B. Architectural Inconsistency (Side-Effect Patterns)
+- **Problem**: `UserService` used clean domain events, but `PurchaseService` was tightly coupled by directly injecting and calling 4 different queues.
+- **Risk**: Violation of SRP (Single Responsibility Principle) and OCP (Open-Closed Principle). Adding a 5th side-effect required modifying the core service.
+- **Fix**: Refactored `PurchaseService` to emit `PURCHASE_COMPLETED`. Created `PurchaseObserver` to handle the side-effects, making the architecture consistent.
+
+### C. Wrong HTTP Semantics
+- **Problem**: `PurchaseController` was returning `200 OK` for resource creation.
+- **Fix**: Updated to `201 Created`, following REST best practices.
+
+### D. Misleading `async` Declarations
+- **Problem**: Methods like `startWeb()` in the container were marked `async` but contained no asynchronous code.
+- **Fix**: Removed the `async` keyword to accurately reflect the synchronous nature of the setup logic, preventing misleading "await" calls by consumers.
+
+### E. Inconsistent Worker Interfaces
+- **Problem**: `CrmWorker.start()` was the only worker that didn't return the BullMQ instances it created.
+- **Fix**: Standardized the `start()` method to return the worker instances for better observability and control.
