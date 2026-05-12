@@ -21,17 +21,21 @@ main().catch((err) => {
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────────────
 
+let isShuttingDown = false;
 async function shutdown() {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
   console.log('[WorkerProcess] shutting down...');
   await container.shutdown();
   process.exit(0);
 }
 
 process.on('SIGTERM', async () => {
-  console.log('[WorkerProcess] SIGTERM received. Closing...');
+  console.log('[WorkerProcess] SIGTERM received.');
   await shutdown();
 });
 process.on('SIGINT', async () => {
-  console.log('[WorkerProcess] SIGINT received. Closing...');
+  console.log('[WorkerProcess] SIGINT received.');
   await shutdown();
 });

@@ -42,7 +42,11 @@ const server = app.listen(PORT, () => {
  * server.close() is callback-based so we wrap it in a Promise to
  * make the shutdown sequence truly sequential and awaitable.
  */
+let isShuttingDown = false;
 async function shutdown() {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
   console.log('[WebProcess] shutting down...');
   if (server && server.listening) {
     await new Promise((resolve, reject) => {
