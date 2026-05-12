@@ -3,11 +3,12 @@
 const { QUEUES } = require('../infra/constants');
 
 class HeartbeatWorker {
-  constructor(queueManager, analyticsClient, watchRepo) {
+  constructor(queueManager, analyticsClient, watchRepo, logger) {
     this.QUEUE_NAME      = QUEUES.HEARTBEAT;
     this.queueManager    = queueManager;
     this.analyticsClient = analyticsClient;
     this.watchRepo       = watchRepo;
+    this.logger          = logger;
   }
 
   start() {
@@ -21,11 +22,8 @@ class HeartbeatWorker {
   async process(job) {
     const { events } = job.data;
 
-    console.log(`[HeartbeatWorker] Processing batch of ${events.length} heartbeats`);
+    this.logger.info({ count: events.length }, '[HeartbeatWorker] processing batch');
 
-    // Persist all heartbeat records concurrently — they are fully independent
-    // of each other. A for-await loop would serialize them and multiply latency
-    // by the batch size with zero benefit.
     await Promise.all(
       events.map((event) =>
         this.watchRepo.upsertWatchProgress({

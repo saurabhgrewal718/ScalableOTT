@@ -2,12 +2,22 @@
 
 const { QUEUES } = require('./infra/constants');
 
+/**
+ * AppContainer (Dependency Injection Container)
+ * 
+ * Centralizes the creation and lifecycle of all services, repos, and controllers.
+ * Uses lazy-loading to ensure components are only created when needed.
+ */
 class AppContainer {
   constructor() {
     this._instances = new Map();
   }
 
   // --- Infrastructure (Lazy) ---
+  get logger() {
+    return this._get('logger', () => require('./infra/logger'));
+  }
+
   get redis() {
     return this._get('redis', () => {
       const { sharedRedis } = require('./infra/redis');
@@ -19,28 +29,28 @@ class AppContainer {
     return this._get('queueManager', () => {
       const { redisConfig } = require('./infra/redis');
       const QueueManager = require('./infra/queue');
-      return new QueueManager(redisConfig);
+      return new QueueManager(redisConfig, this.logger);
     });
   }
 
   get heartbeatBuffer() {
     return this._get('heartbeatBuffer', () => {
       const HeartbeatBuffer = require('./infra/heartbeatBuffer');
-      return new HeartbeatBuffer(this.redis, this.queueManager);
+      return new HeartbeatBuffer(this.redis, this.queueManager, this.logger);
     });
   }
 
   // --- Repositories (Lazy) ---
-  get userRepo() { return this._get('userRepo', () => new (require('./repositories/userRepo'))()); }
-  get purchaseRepo() { return this._get('purchaseRepo', () => new (require('./repositories/purchaseRepo'))()); }
-  get watchRepo() { return this._get('watchRepo', () => new (require('./repositories/watchRepo'))()); }
+  get userRepo() { return this._get('userRepo', () => new (require('./repositories/userRepo'))(this.logger)); }
+  get purchaseRepo() { return this._get('purchaseRepo', () => new (require('./repositories/purchaseRepo'))(this.logger)); }
+  get watchRepo() { return this._get('watchRepo', () => new (require('./repositories/watchRepo'))(this.logger)); }
 
   // --- Clients (Lazy) ---
-  get analyticsClient() { return this._get('analyticsClient', () => new (require('./clients/analyticsClient'))()); }
-  get pushClient() { return this._get('pushClient', () => new (require('./clients/pushClient'))()); }
-  get emailClient() { return this._get('emailClient', () => new (require('./clients/emailClient'))()); }
-  get crmClient() { return this._get('crmClient', () => new (require('./clients/crmClient'))()); }
-  get revenueClient() { return this._get('revenueClient', () => new (require('./clients/revenueClient'))()); }
+  get analyticsClient() { return this._get('analyticsClient', () => new (require('./clients/analyticsClient'))(this.logger)); }
+  get pushClient() { return this._get('pushClient', () => new (require('./clients/pushClient'))(this.logger)); }
+  get emailClient() { return this._get('emailClient', () => new (require('./clients/emailClient'))(this.logger)); }
+  get crmClient() { return this._get('crmClient', () => new (require('./clients/crmClient'))(this.logger)); }
+  get revenueClient() { return this._get('revenueClient', () => new (require('./clients/revenueClient'))(this.logger)); }
 
   // --- Queues (Lazy) ---
   get queues() {
@@ -60,51 +70,46 @@ class AppContainer {
   get userService() {
     return this._get('userService', () => {
       const UserService = require('./services/userService');
-      // Persistent handoff: injecting queue instead of EventEmitter
-      return new UserService(this.userRepo, this.queues.eventsBus);
+      return new UserService(this.userRepo, this.queues.eventsBus, this.logger);
     });
   }
 
   get purchaseService() {
     return this._get('purchaseService', () => {
       const PurchaseService = require('./services/purchaseService');
-      // Persistent handoff: injecting queue instead of EventEmitter
-      return new PurchaseService(this.purchaseRepo, this.queues.eventsBus);
+      return new PurchaseService(this.purchaseRepo, this.queues.eventsBus, this.logger);
     });
   }
 
   get watchService() {
     return this._get('watchService', () => {
       const WatchService = require('./services/watchService');
-      return new WatchService(this.watchRepo, this.heartbeatBuffer);
+      return new WatchService(this.watchRepo, this.heartbeatBuffer, this.logger);
     });
   }
 
-  // --- Controllers (Lazy) ---
-  get userController() {
-    return this._get('userController', () => {
-      const UserController = require('./controllers/userController');
-      const { userSignupSchema } = require('./validators/userValidator');
-      const { validate } = require('./middleware/validate');
-      return new UserController(this.userService, validate(userSignupSchema));
-    });
+  // --- Feature Groups ---
+  getControllers() {
+    return {
+      userController:     this._get('userController',     () => new (require('./controllers/userController'))(this.userService)),
+      purchaseController: this._get('purchaseController', () => new (require('./controllers/purchaseController'))(this.purchaseService)),
+      watchController:    this._get('watchController',    () => new (require('./controllers/watchController'))(this.watchService)),
+    };
   }
 
-  get purchaseController() {
-    return this._get('purchaseController', () => {
-      const PurchaseController = require('./controllers/purchaseController');
-      const { purchaseSchema } = require('./validators/purchaseValidator');
-      const { validate } = require('./middleware/validate');
-      return new PurchaseController(this.purchaseService, validate(purchaseSchema));
-    });
-  }
+  getDashboard() {
+    return this._get('dashboard', () => {
+      const { createBullBoard } = require('@bull-board/api');
+      const { BullMQAdapter } = require('@bull-board/api/bullMQAdapter');
+      const { ExpressAdapter } = require('@bull-board/express');
 
-  get watchController() {
-    return this._get('watchController', () => {
-      const WatchController = require('./controllers/watchController');
-      const { watchEventSchema } = require('./validators/watchValidator');
-      const { validate } = require('./middleware/validate');
-      return new WatchController(this.watchService, validate(watchEventSchema));
+      const serverAdapter = new ExpressAdapter();
+      serverAdapter.setBasePath('/admin/queues');
+
+      const queues = Object.values(this.queues).map(q => new BullMQAdapter(q));
+      createBullBoard({ queues, serverAdapter });
+
+      return { serverAdapter };
     });
   }
 
@@ -120,12 +125,12 @@ class AppContainer {
       const DomainEventWorker = require('./workers/domainEventWorker');
 
       return [
-        new NotificationWorker(this.queueManager, this.pushClient),
-        new AnalyticsWorker(this.queueManager, this.analyticsClient),
-        new EmailWorker(this.queueManager, this.emailClient),
-        new CrmWorker(this.queueManager, this.crmClient),
-        new RevenueWorker(this.queueManager, this.revenueClient),
-        new HeartbeatWorker(this.queueManager, this.analyticsClient, this.watchRepo),
+        new NotificationWorker(this.queueManager, this.pushClient, this.logger),
+        new AnalyticsWorker(this.queueManager, this.analyticsClient, this.logger),
+        new EmailWorker(this.queueManager, this.emailClient, this.logger),
+        new CrmWorker(this.queueManager, this.crmClient, this.logger),
+        new RevenueWorker(this.queueManager, this.revenueClient, this.logger),
+        new HeartbeatWorker(this.queueManager, this.analyticsClient, this.watchRepo, this.logger),
         new DomainEventWorker(
           this.queueManager,
           this.queues.analytics,
@@ -133,7 +138,8 @@ class AppContainer {
           this.queues.crm,
           this.queues.email,
           this.queues.revenue,
-          this.queues.campaigns
+          this.queues.campaigns,
+          this.logger
         ),
       ];
     });
@@ -146,28 +152,22 @@ class AppContainer {
     return this._instances.get(key);
   }
 
-  /**
-   * Start web-side dependencies.
-   */
   startWeb() {
     this.heartbeatBuffer.startFlusher();
-    console.log('[AppContainer] Web-side components started (Flusher)');
+    this.logger.info('[AppContainer] web-side components started');
   }
 
-  /**
-   * Start background workers.
-   */
   startWorker() {
     this.workers.forEach(w => w.start());
-    console.log('[AppContainer] Worker-side components started (BullMQ Workers)');
+    this.logger.info('[AppContainer] worker-side components started');
   }
 
-  async shutdown() {
-    console.log('[AppContainer] performing graceful shutdown...');
+  async dispose() {
+    this.logger.info('[AppContainer] performing graceful shutdown...');
     if (this._instances.has('heartbeatBuffer')) await this.heartbeatBuffer.stopFlusher();
     if (this._instances.has('queueManager')) await this.queueManager.closeAll();
     if (this._instances.has('redis')) await this.redis.quit();
   }
 }
 
-module.exports = new AppContainer();
+module.exports = { AppContainer };

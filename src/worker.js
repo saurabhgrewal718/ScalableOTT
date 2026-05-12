@@ -1,41 +1,41 @@
 'use strict';
-require('dotenv').config();
 
-const container = require('./container');
+require('dotenv').config();
+const { AppContainer } = require('./container');
 
 /**
- * Entry point for the background worker process.
- * Wrapped in an async main() so startup errors surface as
- * explicit failures rather than silent unhandled rejections.
+ * Staff-Level Worker Process
  */
-async function main() {
-  console.log('[WorkerProcess] Starting all background workers...');
-  await container.startWorker();
-  console.log('[WorkerProcess] Workers are now listening for jobs.');
+async function startWorker() {
+  const container = new AppContainer();
+  const logger = container.logger;
+
+  try {
+    logger.info('[WorkerProcess] starting background workers...');
+    container.startWorker();
+    logger.info('[WorkerProcess] workers are now listening for jobs');
+  } catch (err) {
+    logger.error({ err }, '[WorkerProcess] fatal startup error');
+    process.exit(1);
+  }
+
+  // Graceful Shutdown (Idempotent)
+  let isShuttingDown = false;
+  const shutdown = async (signal) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    
+    logger.info({ signal }, '[WorkerProcess] shutdown initiated');
+    await container.dispose();
+    process.exit(0);
+  };
+
+  process.on('SIGINT',  () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-main().catch((err) => {
-  console.error('[WorkerProcess] Fatal startup error:', err);
-  process.exit(1);
-});
-
-// ─── Graceful Shutdown ───────────────────────────────────────────────────────
-
-let isShuttingDown = false;
-async function shutdown() {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
-
-  console.log('[WorkerProcess] shutting down...');
-  await container.shutdown();
-  process.exit(0);
+if (require.main === module) {
+  startWorker();
 }
 
-process.on('SIGTERM', async () => {
-  console.log('[WorkerProcess] SIGTERM received.');
-  await shutdown();
-});
-process.on('SIGINT', async () => {
-  console.log('[WorkerProcess] SIGINT received.');
-  await shutdown();
-});
+module.exports = { startWorker };

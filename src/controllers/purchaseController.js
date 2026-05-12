@@ -1,20 +1,29 @@
 'use strict';
 
-class PurchaseController {
-  constructor(purchaseService, validation) {
+const BaseController = require('./baseController');
+const { purchaseSchema } = require('../validators/purchaseValidator');
+
+class PurchaseController extends BaseController {
+  constructor(purchaseService) {
+    super();
     this.purchaseService = purchaseService;
-    this.validation = validation;
+    this.setupRoutes();
   }
 
   /**
-   * POST /purchase/complete
+   * DECLARATIVE ROUTE MANIFEST
    */
+  static get routes() {
+    return [
+      { method: 'post', path: '/complete', handler: 'handleContentPurchase', schema: purchaseSchema },
+    ];
+  }
+
   async handleContentPurchase(req, res, next) {
     try {
       const data     = req.validated;
       const purchase = await this.purchaseService.completePurchase(data);
       
-      // REST convention: 201 Created for resource creation
       res.status(201).json({ 
         status: true, 
         message: 'Purchase recorded', 

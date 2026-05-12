@@ -1,19 +1,30 @@
 'use strict';
 
-class WatchController {
-  constructor(watchService, validation) {
+const BaseController = require('./baseController');
+const { watchEventSchema } = require('../validators/watchValidator');
+
+class WatchController extends BaseController {
+  constructor(watchService) {
+    super();
     this.watchService = watchService;
-    this.validation = validation;
+    this.setupRoutes();
   }
 
   /**
-   * POST /watch/event
+   * DECLARATIVE ROUTE MANIFEST
    */
+  static get routes() {
+    return [
+      { method: 'post', path: '/event', handler: 'handleVideoWatched', schema: watchEventSchema },
+    ];
+  }
+
   async handleVideoWatched(req, res, next) {
     try {
-      const data   = req.validated;
-      const result = await this.watchService.trackProgress(data);
-      res.status(200).json({ status: true, ...result });
+      const data = req.validated;
+      await this.watchService.trackProgress(data);
+      
+      res.status(200).json({ status: true, message: 'Progress recorded' });
     } catch (err) {
       next(err);
     }

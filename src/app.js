@@ -1,69 +1,66 @@
 'use strict';
+
 require('dotenv').config();
-
 const express = require('express');
-const container = require('./container');
+const { AppContainer } = require('./container');
 const { errorHandler } = require('./middleware/errorHandler');
-const { setupDashboard } = require('./infra/dashboard');
-
-const app = express();
-app.use(express.json());
-
-// ── Routes ──────────────────────────────────────────────────────────────────
-const { userController, purchaseController, watchController } = container;
-
-app.post('/user/signup',       userController.validation,     userController.handleUserSignup.bind(userController));
-app.post('/purchase/complete', purchaseController.validation, purchaseController.handleContentPurchase.bind(purchaseController));
-app.post('/watch/event',       watchController.validation,    watchController.handleVideoWatched.bind(watchController));
-
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'ok',
-    process: 'web',
-    uptime: process.uptime(),
-    memory: process.memoryUsage().heapUsed,
-  });
-});
-
-app.use(errorHandler);
-
-// ─── Startup ─────────────────────────────────────────────────────────────────
-
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  console.log(`[WebProcess] server listening on port ${PORT}`);
-  container.startWeb();
-  setupDashboard(app, container.queueManager);
-});
 
 /**
- * Graceful shutdown: wait for in-flight HTTP requests to drain,
- * then tear down queues and Redis connections.
- * server.close() is callback-based so we wrap it in a Promise to
- * make the shutdown sequence truly sequential and awaitable.
+ * Staff-Level Modular API
+ * All routing is handled internally by Controllers via 'BaseController'
  */
-let isShuttingDown = false;
-async function shutdown() {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
+function startWeb() {
+  const app = express();
+  const container = new AppContainer();
+  const logger = container.logger;
 
-  console.log('[WebProcess] shutting down...');
-  if (server && server.listening) {
-    await new Promise((resolve, reject) => {
-      server.close((err) => (err ? reject(err) : resolve()));
+  // 1. Global Middleware
+  app.use(express.json());
+
+  // 2. Health & Monitoring
+  const { serverAdapter } = container.getDashboard();
+  app.use('/admin/queues', serverAdapter.getRouter());
+  
+  app.get('/health', (_req, res) => {
+    res.json({ status: 'ok', uptime: process.uptime(), process: 'web' });
+  });
+
+  // 3. Feature Mounting (The "Clean" Manifest)
+  const { userController, purchaseController, watchController } = container.getControllers();
+  
+  app.use('/user',     userController.router);
+  app.use('/purchase', purchaseController.router);
+  app.use('/watch',    watchController.router);
+
+  // 4. Global Error Handling
+  app.use(errorHandler);
+
+  // 5. Lifecyle Management
+  const PORT = process.env.PORT || 3000;
+  const server = app.listen(PORT, () => {
+    logger.info({ port: PORT }, '[WebProcess] server listening');
+    container.startWeb(); 
+  });
+
+  // 6. Graceful Shutdown (Idempotent)
+  let isShuttingDown = false;
+  const shutdown = async (signal) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    
+    logger.info({ signal }, '[WebProcess] shutdown initiated');
+    server.close(async () => {
+      await container.dispose();
+      process.exit(0);
     });
-  }
-  await container.shutdown();
-  process.exit(0);
+  };
+
+  process.on('SIGINT',  () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-process.on('SIGTERM', async () => {
-  console.log('[WebProcess] SIGTERM received.');
-  await shutdown();
-});
-process.on('SIGINT', async () => {
-  console.log('[WebProcess] SIGINT received.');
-  await shutdown();
-});
+if (require.main === module) {
+  startWeb();
+}
 
-module.exports = app;
+module.exports = { startWeb };

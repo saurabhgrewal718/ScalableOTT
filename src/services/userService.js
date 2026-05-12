@@ -6,23 +6,23 @@ class UserService {
   /**
    * @param {object} userRepo
    * @param {object} domainEventQueue
+   * @param {object} logger
    */
-  constructor(userRepo, domainEventQueue) {
+  constructor(userRepo, domainEventQueue, logger) {
     this.userRepo = userRepo;
     this.domainEventQueue = domainEventQueue;
+    this.logger = logger;
   }
 
   async signupUser(data) {
-    // 1. Critical path: persist the user record with an idempotency check.
+    // 1. Critical path: persist the user record with idempotency check.
     const { user, isNew } = await this.userRepo.saveUser(data);
 
     // 2. Only emit the domain event if this is a NEW registration.
-    //    This prevents duplicate side-effects (emails, analytics) if the
-    //    client retries the request.
     if (isNew) {
       await this.domainEventQueue.add(EVENTS.USER_SIGNUP, user);
     } else {
-      console.log(`[UserService] Skipping domain event for existing user=${user.userId}`);
+      this.logger.info({ userId: user.userId }, '[UserService] skipping domain event for existing user');
     }
 
     return user;

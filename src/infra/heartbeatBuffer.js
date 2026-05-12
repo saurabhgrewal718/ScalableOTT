@@ -2,109 +2,85 @@
 
 const { QUEUES } = require('./constants');
 
-/**
- * HeartbeatBuffer
- * 
- * A high-throughput "Write-Behind" cache.
- * Instead of hitting the DB on every heartbeat (every 5-10s), we buffer 
- * events in a Redis list and flush them in bulk to the DB.
- */
 class HeartbeatBuffer {
   /**
-   * @param {object} redis - ioredis instance
-   * @param {object} queueManager
+   * @param {object} redis - Redis instance
+   * @param {object} queueManager - Instance of QueueManager
    */
-  constructor(redis, queueManager) {
+  constructor(redis, queueManager, logger) {
+    this.CIRCUIT_RESET_MS = parseInt(process.env.HEARTBEAT_CIRCUIT_RESET_MS || '60000', 10);
+    this.FLUSH_INTERVAL_MS = parseInt(process.env.HEARTBEAT_FLUSH_INTERVAL_MS || '10000', 10);
+    this.REDIS_KEY = 'heartbeat_buffer';
+    this.QUEUE_NAME = QUEUES.HEARTBEAT;
+
     this.redis = redis;
     this.queueManager = queueManager;
-    this.BUFFER_KEY = 'heartbeat_buffer';
-    this.LAST_POS_PREFIX = 'watch:last:';
-    this.flushInterval = null;
-    
-    // Atomic Lua script to ensure "Monotonicity" (watchedSeconds must only increase)
-    // Returns 1 if updated, 0 if rejected as duplicate/stale.
-    this.LUA_MONOTONIC_CHECK = `
-      local key = KEYS[1]
-      local newVal = tonumber(ARGV[1])
-      local currentVal = tonumber(redis.call('GET', key) or '-1')
-      
-      if newVal > currentVal then
-        redis.call('SET', key, newVal, 'EX', 3600) -- 1h TTL
-        return 1
-      else
-        return 0
-      end
-    `;
+    this.logger = logger;
+
+    this.flushTimer = null;
+    this.isFlushing = false;
+    this.circuitOpen = false;
   }
 
-  /**
-   * Records a heartbeat with "Monotonicity Filtering".
-   */
   async record(event) {
-    const { sessionId, watchedSeconds } = event;
-    const lastPosKey = `${this.LAST_POS_PREFIX}${sessionId}`;
-
     try {
-      // 1. Atomic Check: Only proceed if this value is GREATER than the last one we saw.
-      const isNew = await this.redis.eval(
-        this.LUA_MONOTONIC_CHECK, 
-        1, 
-        lastPosKey, 
-        watchedSeconds
-      );
-
-      if (!isNew) {
-        // Discarding duplicate/stale heartbeat to save Redis memory & DB throughput
-        return { status: 'discarded', reason: 'non-monotonic' };
-      }
-
-      // 2. Add the unique, advancing heartbeat to the Write-Behind buffer
-      await this.redis.lpush(this.BUFFER_KEY, JSON.stringify(event));
-      return { status: 'buffered' };
-
+      await this.redis.hset(this.REDIS_KEY, event.sessionId, JSON.stringify({
+        ...event,
+        timestamp: Date.now()
+      }));
     } catch (err) {
-      console.error('[HeartbeatBuffer] Error recording heartbeat:', err);
-      // Fallback: at 10M scale, if Redis is failing, we might want to log/drop
-      throw err;
+      this.logger.error({ err: err.message }, '[HeartbeatBuffer] failed to write to Redis');
     }
   }
 
-  /**
-   * Flushes the buffer into the background worker queue.
-   */
   async flush() {
-    const len = await this.redis.llen(this.BUFFER_KEY);
-    if (len === 0) return;
+    if (this.isFlushing || this.circuitOpen) return;
 
-    console.log(`[HeartbeatBuffer] Flushing ${len} events to worker queue...`);
+    this.isFlushing = true;
+    try {
+      const data = await this.redis.hgetall(this.REDIS_KEY);
+      if (!data || Object.keys(data).length === 0) {
+        this.isFlushing = false;
+        return;
+      }
 
-    // Use a temporary key to atomically pop all items
-    const tempKey = `heartbeat_flush:${Date.now()}`;
-    await this.redis.rename(this.BUFFER_KEY, tempKey);
+      await this.redis.del(this.REDIS_KEY);
 
-    const items = await this.redis.lrange(tempKey, 0, -1);
-    await this.redis.del(tempKey);
+      const snapshot = Object.values(data).map(v => JSON.parse(v));
+      this.logger.info({ count: snapshot.length }, '[HeartbeatBuffer] flushing heartbeats to queue');
 
-    // Push to BullMQ for the HeartbeatWorker to process in bulk
-    const heartbeatQueue = this.queueManager.createQueue(QUEUES.HEARTBEAT);
-    await heartbeatQueue.add('bulk_heartbeat_flush', {
-      events: items.map(i => JSON.parse(i)),
-      timestamp: new Date().toISOString()
-    });
+      const saveQueue = this.queueManager.createQueue(this.QUEUE_NAME);
+      await saveQueue.add('process_batch', { events: snapshot });
+
+      this.circuitOpen = false;
+    } catch (err) {
+      this.logger.error({ err: err.message }, '[HeartbeatBuffer] flush failed — opening circuit');
+      this.circuitOpen = true;
+      setTimeout(() => {
+        this.logger.info('[HeartbeatBuffer] circuit RESET');
+        this.circuitOpen = false;
+      }, this.CIRCUIT_RESET_MS);
+    } finally {
+      this.isFlushing = false;
+    }
   }
 
-  startFlusher(intervalMs = 10000) {
-    if (this.flushInterval) return;
-    this.flushInterval = setInterval(() => this.flush(), intervalMs);
-    console.log(`[HeartbeatBuffer] Redis-backed flusher started (interval=${intervalMs}ms)`);
+  startFlusher() {
+    if (this.flushTimer) return;
+    
+    // Applying Jitter to prevent "Thundering Herd" spikes
+    const jitter = Math.random() * 2000;
+    this.flushTimer = setInterval(() => this.flush(), this.FLUSH_INTERVAL_MS + jitter);
+    
+    this.logger.info({ interval: this.FLUSH_INTERVAL_MS, jitter }, '[HeartbeatBuffer] jittered flusher started');
   }
 
   async stopFlusher() {
-    if (this.flushInterval) {
-      clearInterval(this.flushInterval);
-      this.flushInterval = null;
-      await this.flush(); // Final flush
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
     }
+    await this.flush();
   }
 }
 

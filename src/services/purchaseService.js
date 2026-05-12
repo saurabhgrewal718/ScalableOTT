@@ -6,15 +6,16 @@ class PurchaseService {
   /**
    * @param {object} purchaseRepo
    * @param {object} domainEventQueue
+   * @param {object} logger
    */
-  constructor(purchaseRepo, domainEventQueue) {
+  constructor(purchaseRepo, domainEventQueue, logger) {
     this.purchaseRepo = purchaseRepo;
     this.domainEventQueue = domainEventQueue;
+    this.logger = logger;
   }
 
   async completePurchase({ userId, planId, amount, currency, email, deviceToken, idempotencyKey }) {
     // 1. Critical path: persist the purchase record with idempotency check.
-    //    We use the idempotencyKey (if provided) to ensure we don't charge twice.
     const { purchase, isNew } = await this.purchaseRepo.savePurchase({ 
       userId, 
       planId, 
@@ -34,7 +35,7 @@ class PurchaseService {
         deviceToken,
       });
     } else {
-      console.log(`[PurchaseService] Skipping side-effects for duplicate purchase=${purchase.id}`);
+      this.logger.info({ purchaseId: purchase.id }, '[PurchaseService] skipping side-effects for duplicate purchase');
     }
 
     return purchase;

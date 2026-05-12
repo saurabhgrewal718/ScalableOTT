@@ -3,20 +3,19 @@
 const { simulateDbLatency } = require('../utils/simulation');
 
 class PurchaseRepo {
-  constructor() {
+  constructor(logger) {
+    this.logger = logger;
     this.db = new Map();
   }
 
   /**
    * Saves a purchase with idempotency.
-   * In a real system, the idempotencyKey would come from the client/header.
    */
   async savePurchase({ userId, planId, amount, idempotencyKey }) {
     await simulateDbLatency(15);
     
-    // If an idempotencyKey is provided, check if we've already handled it
     if (idempotencyKey && this.db.has(idempotencyKey)) {
-      console.log(`[PurchaseRepo] Idempotency Hit: purchase key=${idempotencyKey} already exists.`);
+      this.logger.info({ idempotencyKey }, '[PurchaseRepo] idempotency hit');
       return { purchase: this.db.get(idempotencyKey), isNew: false };
     }
 
@@ -30,7 +29,7 @@ class PurchaseRepo {
     };
     
     this.db.set(id, record);
-    console.log(`[PurchaseRepo] saved new purchase id=${id}`);
+    this.logger.info({ id, userId }, '[PurchaseRepo] saved new purchase');
     
     return { purchase: record, isNew: true };
   }

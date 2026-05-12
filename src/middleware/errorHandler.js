@@ -14,6 +14,8 @@
  * In production, swap console.error for your structured logger (Pino / Winston).
  */
 
+const logger = require('../infra/logger');
+
 // eslint-disable-next-line no-unused-vars
 function errorHandler(err, req, res, _next) {
   const isDev = process.env.NODE_ENV !== 'production';
@@ -31,10 +33,18 @@ function errorHandler(err, req, res, _next) {
   };
 
   // Structured log
+  const logContext = {
+    method: req.method,
+    path:   req.path,
+    statusCode,
+    err:    err.message,
+    ...(isDev && { stack: err.stack }),
+  };
+
   if (statusCode >= 500) {
-    console.error(`[errorHandler] ${req.method} ${req.path} → ${statusCode}`, err);
+    logger.error(logContext, '[errorHandler] server error');
   } else {
-    console.warn(`[errorHandler] ${req.method} ${req.path} → ${statusCode}: ${err.message}`);
+    logger.warn(logContext, '[errorHandler] client error');
   }
 
   res.status(statusCode).json(body);
