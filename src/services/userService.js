@@ -6,7 +6,7 @@ class UserService {
    * @param {object} domainEvents - Central EventEmitter for decoupled side-effects.
    */
   constructor(userRepo, domainEvents) {
-    this.userRepo     = userRepo;
+    this.userRepo = userRepo;
     this.domainEvents = domainEvents;
   }
 

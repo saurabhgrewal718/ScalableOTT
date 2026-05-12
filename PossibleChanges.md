@@ -100,3 +100,38 @@ const sideEffects = await Promise.allSettled([...]); // ✅ never throws
 ```
 
 **The Rule:** Once a critical DB write has succeeded, side-effect queue operations must use `Promise.allSettled`. A queue failure must never retroactively make a committed transaction appear failed to the end user. This is especially critical for any flow involving money.
+
+---
+
+## 12. Bug Fix: Double-Write Anti-Pattern in Write-Behind Cache (`watchService.js`)
+
+**The Bug:**
+```js
+// Original watchService.trackProgress() — writing to DB AND Redis on every heartbeat
+await this.watchRepo.upsertWatchProgress({ userId, contentId, watchedSeconds, sessionId }); // ❌ Write #1 — direct DB hit
+await this.heartbeatBuffer.record({ userId, contentId, watchedSeconds, sessionId });          // Write #2 — Redis buffer
+```
+
+The codebase implements a **write-behind (write-back) buffer** specifically to avoid hammering the DB on every heartbeat event. A video player fires a heartbeat every ~5 seconds. At 10M concurrent viewers:
+
+```
+10,000,000 viewers × 1 heartbeat / 5s = 2,000,000 DB writes per second
+```
+
+That volume would destroy any relational database. The buffer's job is to absorb this into periodic bulk upserts via `HeartbeatWorker` every 10 seconds — dramatically reducing DB pressure.
+
+But by also doing write #1 (the direct `upsertWatchProgress` call), the code was:
+- **Still hitting the DB on every heartbeat** — defeating the entire purpose of the buffer
+- **Writing every record twice** — write #1 directly in the hot path, write #2 again when the worker flushed
+- **Making the buffer pure overhead** — Redis was taking writes with zero throughput benefit
+
+**The Fix:**
+```js
+// Fixed watchService.trackProgress() — only buffer, never write directly to DB
+await this.heartbeatBuffer.record({ userId, contentId, watchedSeconds, sessionId }); // ✅ Redis only
+// HeartbeatWorker handles the DB write in bulk on its flush interval
+```
+
+**The Trade-off (accepted):** There is a data-loss window of up to `HEARTBEAT_FLUSH_INTERVAL_MS` (10 seconds) if the web server crashes before a flush. This is intentional and acceptable for watch progress — nobody cares if resume position is 10 seconds stale after a crash. It would **not** be acceptable for purchases or user records, which is why those write directly to the DB.
+
+**The Rule:** Pick one write strategy and commit to it. Never mix a write-behind buffer with a direct DB write for the same record — you get double the load with none of the benefit.
