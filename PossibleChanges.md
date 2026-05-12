@@ -178,3 +178,23 @@ Replaced the in-memory `EventEmitter` with a **Persistent Domain Event Bus** pow
 - **The Change**: Services now add a job to a dedicated `domain_events_bus` queue in Redis.
 - **The Worker**: A new `DomainEventWorker` listens to this bus and "fans out" the work to specialized side-effect queues (Analytics, Email, etc.).
 - **The Benefit**: 100% durability. Once a signup is committed, the event is safe in Redis. Even if the entire web cluster goes down, the background workers will process the events as soon as they come back online. This is the foundation for a truly resilient, event-driven microservices architecture at 10M+ user scale.
+
+---
+
+## 15. Staff-Level API Design: Context Headers & Idempotency
+
+**The Problem:**
+Infrastructure-level metadata (like `platform` and `deviceToken`) was originally mixed into the request body JSON. This cluttered the domain models and made the API rigid. Furthermore, the API was not idempotent — retried requests resulted in duplicate side-effects (e.g., multiple welcome emails).
+
+**The Fix:**
+1.  **Context Headers**: Refactored the API to use HTTP Headers for contextual metadata. 
+    - `Idempotency-Key`: For request deduplication.
+    - `X-Platform`: For client environment tracking (iOS/Android/Web).
+    - `X-Device-Token`: For notification targeting.
+2.  **Request Deduplication logic**: Updated `UserService` and `PurchaseService` to use a "Check-then-Act" pattern. The system now verifies if a request with a specific `Idempotency-Key` or logical ID has already been processed.
+3.  **Idempotent Success**: If a duplicate request is detected, the API returns the existing record (Success) but **skips** enqueuing background events.
+
+**The Benefit:**
+- **Cleaner Data Model**: The request body now only contains relevant business data (Email, Name, PlanId).
+- **Resilience**: The system is now immune to "Network Retries." If a client spams the Signup button, they only get one email and one account.
+- **Observability**: Using standard headers makes it easy to log and trace request context globally via middleware without modifying every individual controller.
