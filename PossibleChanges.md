@@ -219,3 +219,21 @@ As the platform evolves, we will inevitably need to change the data structures o
 - **Zero Downtime**: We can deploy new features without forcing users to update their apps immediately.
 - **Developer Experience**: Clear versioning allows third-party developers to build on our platform with confidence that their integration won't break tomorrow.
 - **Graceful Deprecation**: We can monitor header usage to see exactly how many users are still on `v1` before we decide to sunset it.
+
+---
+
+## 17. Heartbeat Validation & Semantic Intelligence
+
+**The Problem:**
+The `watch` event (heartbeat) currently accepts any `watchedSeconds` value passed by the client. There is no verification that the value is realistic or even within the bounds of the actual video length.
+
+**The Proposal:**
+1.  **Bounds Checking**: The `WatchService` should look up the metadata for the `contentId` and reject any heartbeat where `watchedSeconds > totalDuration`.
+2.  **Velocity Validation (Anti-Cheat)**: Implement a check to ensure the user isn't "teleporting." If heartbeats are sent every 10 seconds, the delta between `watchedSeconds` should not exceed ~10 seconds (allowing for a small buffer).
+3.  **Intelligent Deduplication**: While we must support **rewinds** (where `watchedSeconds` decreases), we should still discard heartbeats where the value hasn't changed at all since the last successful record. This reduces Redis/DB load without losing "resume position" accuracy.
+4.  **Session Heartbeat Expiry**: Automatically clean up the `watch:last:sessionId` tracking keys in Redis after a period of inactivity to keep the memory footprint lean.
+
+**The Benefit:**
+- **Data Integrity**: Ensures the "Resume Watching" feature is always accurate and never shows impossible values.
+- **Security**: Prevents users from "faking" completion of content (useful if the platform has rewards or "marked as watched" features).
+- **Storage Efficiency**: Dramatically reduces the volume of redundant data stored in the Write-Behind buffer.
