@@ -163,3 +163,18 @@ The following "basic" industry-standard mistakes were identified and resolved to
 ### E. Inconsistent Worker Interfaces
 - **Problem**: `CrmWorker.start()` was the only worker that didn't return the BullMQ instances it created.
 - **Fix**: Standardized the `start()` method to return the worker instances for better observability and control.
+
+---
+
+## 14. Architecture Upgrade: Persistent Domain Event Bus (Fan-out Pattern)
+
+**The Problem:**
+Originally, the system used a local `EventEmitter` to hand off domain events (like `user:signup`) from the Services to the Observers. 
+- **Scale Risk**: If the web server process crashed or restarted immediately after a database write, any events "in flight" in the server's RAM were lost forever.
+- **Reliability**: There was no durability or retry mechanism for the handoff itself.
+
+**The Fix:**
+Replaced the in-memory `EventEmitter` with a **Persistent Domain Event Bus** powered by BullMQ.
+- **The Change**: Services now add a job to a dedicated `domain_events_bus` queue in Redis.
+- **The Worker**: A new `DomainEventWorker` listens to this bus and "fans out" the work to specialized side-effect queues (Analytics, Email, etc.).
+- **The Benefit**: 100% durability. Once a signup is committed, the event is safe in Redis. Even if the entire web cluster goes down, the background workers will process the events as soon as they come back online. This is the foundation for a truly resilient, event-driven microservices architecture at 10M+ user scale.
