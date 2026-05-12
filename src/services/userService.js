@@ -18,7 +18,10 @@ class UserService {
     // 2. Emit the domain event fire-and-forget. The SignupObserver handles
     //    all async side-effects (analytics, push, CRM) without blocking
     //    the HTTP response to the caller.
-    this.domainEvents.emit('user:signup', data);
+    //    We emit `user` (the saved DB record), NOT `data` (the raw input).
+    //    The persisted entity may differ from the input (e.g. createdAt,
+    //    normalised fields) — observers must always receive the source of truth.
+    this.domainEvents.emit('user:signup', user);
 
     return user;
   }

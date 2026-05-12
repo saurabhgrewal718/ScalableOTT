@@ -13,10 +13,15 @@ class PurchaseService {
     // 1. Critical path: persist the purchase record first.
     const purchase = await this.purchaseRepo.savePurchase({ userId, planId, amount });
 
-    // 2. Fire all independent side-effect queues concurrently.
-    //    These have zero ordering dependency between them — awaiting
-    //    them sequentially would multiply latency for no reason.
-    await Promise.all([
+    // 2. Enqueue all side-effect notifications concurrently.
+    //    IMPORTANT: we use Promise.allSettled, NOT Promise.all.
+    //    The purchase is already committed to the DB above. A transient
+    //    Redis blip that fails one queue must NEVER cause this function to
+    //    throw — that would return a 500 to the customer even though their
+    //    payment went through, which could trigger a double-charge retry.
+    //    Each failure is logged individually for ops visibility; BullMQ
+    //    retries are the recovery mechanism, not the caller's error path.
+    const sideEffects = await Promise.allSettled([
       this.pushQueue.add('purchase_push', {
         userId,
         token: deviceToken,
@@ -40,6 +45,16 @@ class PurchaseService {
         campaignId: 'premium_onboarding',
       }),
     ]);
+
+    const labels = ['push', 'email', 'revenue', 'crm'];
+    sideEffects.forEach((result, i) => {
+      if (result.status === 'rejected') {
+        console.error(
+          `[PurchaseService] ❌ Failed to enqueue ${labels[i]} side-effect for purchaseId=${purchase.id}:`,
+          result.reason?.message
+        );
+      }
+    });
 
     return purchase;
   }

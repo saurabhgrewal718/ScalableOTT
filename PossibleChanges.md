@@ -57,4 +57,46 @@ Currently we are not controlling that, the process can go on a long time.
 *   **The Change**: Ensure your `DatabaseService` uses a connection pool with a `max` setting. Currently we are not using any DB but in case if we are this can be used.
 *   **The Benefit**: With 50 concurrent workers hammering the database, you must limit the connections. If you allow 100 workers to open 100 connections each, you will crash your database server. The pool acts as a "gatekeeper."
 
+---
 
+## 10. Bug Fix: Always Emit the Persisted Entity from Domain Events (`userService.js`)
+
+**The Bug:**
+```js
+const user = await this.userRepo.saveUser(data);
+this.domainEvents.emit('user:signup', data); // ❌ raw request input, not the saved record
+```
+
+After a DB save, the code was emitting `data` (the raw HTTP request payload) instead of `user` (the actual saved DB record). This is a fundamental mistake — the DB record is the **source of truth**. It can differ from the input (e.g. `createdAt` timestamps, normalised fields, DB-generated IDs). Any observer receiving `data` is working with potentially stale or incomplete information.
+
+**The Fix:**
+```js
+this.domainEvents.emit('user:signup', user); // ✅ persisted entity
+```
+
+**The Rule:** After any DB operation, domain events must carry the **persisted entity**, never the raw input.
+
+---
+
+## 11. Bug Fix: Use `Promise.allSettled` for Side-Effects After a Committed DB Write (`purchaseService.js`)
+
+**The Bug:**
+```js
+const purchase = await this.purchaseRepo.savePurchase(...); // ✅ DB write succeeds
+await Promise.all([                                          // ❌ if Redis blips...
+  this.pushQueue.add(...),
+  this.emailQueue.add(...),
+]);
+// → throws → controller returns 500 → customer sees "Purchase Failed"
+// → but the purchase IS in the DB and they WERE charged
+```
+
+`Promise.all` rejects as soon as **any** promise fails. If Redis has a 1-second blip after the purchase is already committed to the DB, the customer receives a 500 error and may retry — potentially getting double-charged.
+
+**The Fix:**
+```js
+const sideEffects = await Promise.allSettled([...]); // ✅ never throws
+// log each individual queue failure, let BullMQ retries handle recovery
+```
+
+**The Rule:** Once a critical DB write has succeeded, side-effect queue operations must use `Promise.allSettled`. A queue failure must never retroactively make a committed transaction appear failed to the end user. This is especially critical for any flow involving money.
