@@ -129,3 +129,30 @@ Some changes i would do.
 * **Connection Isolation:** Refactor `QueueManager` to provide dedicated Redis instances for producers (Queues) and consumers (Workers).
 * **Blocking Prevention:** Eliminates resource contention caused by BullMQ's blocking commands (`BRPOPLPUSH`), which can starve producers.
 * **Optimized Latency:** Ensures that adding new jobs remains non-blocking and highly responsive even during heavy consumer load.
+
+
+## Implemented:
+
+1. Unified Dependency Injection: Refactored to a class-based AppContainer for standardized lazy-loading and component lifecycle management.
+
+2. Structured JSON Logging: Integrated Pino across the entire stack for high-performance, production-grade observability.
+
+3. Declarative Route Management: Introduced BaseController to automate Express routing and validation using a static manifest pattern.
+
+4. Metadata Header Extraction: Enhanced validation middleware to automatically pull Idempotency-Key, Platform, and Device-Token from HTTP headers.
+  
+5. Strict Idempotency Guards: Implemented repository-level tracking and service-level checks to ensure side effects (like emails) only fire for new records.
+
+6. Jittered Flush Intervals: Introduced random jitter to HeartbeatBuffer timers to smooth out Redis CPU spikes and prevent "thundering herd" issues.
+
+7. Atomic Lua Monotonicity: Implemented a Redis Lua script to ensure watch progress only updates if the new timestamp is greater than the previous one.
+
+8. Configurable Worker Concurrency: Added CONCURRENCY environment variable support to workers to allow processing multiple jobs in parallel.
+
+9. Hard External Timeouts: Implemented Promise.race in the RevenueWorker to prevent third-party API hangs from blocking the entire worker process.
+
+10. Parallel Batch Processing: Refactored HeartbeatWorker to use Promise.all for database writes, significantly increasing throughput for batch updates.
+
+11. Promisified Graceful Shutdown: Upgraded signal handlers (SIGTERM/SIGINT) to use await on server closures, ensuring in-flight requests finish safely.
+
+12. Twelve-Factor Configuration: Moved hardcoded worker settings (timeouts, intervals) to environment variables for better infrastructure flexibility.
