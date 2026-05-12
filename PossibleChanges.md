@@ -262,3 +262,20 @@ startFlusher(baseIntervalMs = 10000) {
 **The Benefit:**
 - **Load Smoothing**: The Redis write load is "spread out" over time, resulting in a flat, predictable performance graph instead of a "sawtooth" spike pattern.
 - **Improved API Latency**: By eliminating the micro-spikes, we protect the critical path (Payments/Signups) from being delayed by background heartbeat flushes.
+
+---
+
+## 19. The "Financial Guard": Hard Timeouts & Idempotency Propagation
+
+**The Problem:**
+Background workers that call external payment gateways (Revenue Worker) are vulnerable to third-party latency. If a gateway takes 60s to respond, the worker is blocked, the queue backs up, and BullMQ might "Stall" and retry the job—leading to potential double-charges.
+
+**The Fix:**
+1.  **Job-Level Race Timeout**: Wrap critical external calls in a `Promise.race` with a hard timeout (e.g., 15 seconds).
+2.  **Idempotency Propagation**: Ensure the `Idempotency-Key` from the original HTTP request is passed through the Domain Event Bus and into the final Worker job.
+3.  **Atomic Deduplication**: Pass this key to the external gateway so that even on a timeout retry, the gateway recognizes the duplicate and prevents a second charge.
+
+**The Benefit:**
+- **Zero Double-Charging**: Even in catastrophic failure scenarios, the system is mathematically guaranteed to only process a payment once.
+- **Worker Availability**: By cutting off slow requests, we ensure that a single slow partner doesn't take down our entire background processing fleet.
+- **Resilient Recovery**: Failed jobs are retried automatically, but safely, allowing the system to "catch up" once the third-party gateway recovers.
