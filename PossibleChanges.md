@@ -237,3 +237,28 @@ The `watch` event (heartbeat) currently accepts any `watchedSeconds` value passe
 - **Data Integrity**: Ensures the "Resume Watching" feature is always accurate and never shows impossible values.
 - **Security**: Prevents users from "faking" completion of content (useful if the platform has rewards or "marked as watched" features).
 - **Storage Efficiency**: Dramatically reduces the volume of redundant data stored in the Write-Behind buffer.
+
+---
+
+## 18. Solving the "Thundering Herd" (Flush Spikes)
+
+**The Problem:**
+Currently, every web server instance flushes its `HeartbeatBuffer` to Redis every 10,000ms. In a 10M user environment with 100+ server instances, all instances will likely synchronize their clocks and "Flush" at the exact same millisecond.
+
+**The Risk:**
+This creates a massive, periodic spike in Redis CPU and Network I/O. Even if the total load is manageable, the "Micro-Spike" can cause connection timeouts and latency jitter for the Signup and Purchase APIs that share the same Redis cluster.
+
+**The Proposed Fix:**
+Implement **Jittered Flush Intervals**. Instead of a fixed 10s timer, we introduce a random variation to the interval on each server:
+
+```js
+// Inside HeartbeatBuffer.js
+startFlusher(baseIntervalMs = 10000) {
+  const jitter = Math.random() * 2000; // ±2 seconds of randomness
+  this.flushInterval = setInterval(() => this.flush(), baseIntervalMs + jitter);
+}
+```
+
+**The Benefit:**
+- **Load Smoothing**: The Redis write load is "spread out" over time, resulting in a flat, predictable performance graph instead of a "sawtooth" spike pattern.
+- **Improved API Latency**: By eliminating the micro-spikes, we protect the critical path (Payments/Signups) from being delayed by background heartbeat flushes.
