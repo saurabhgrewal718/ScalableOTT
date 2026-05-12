@@ -9,6 +9,7 @@ const purchaseSchema = z.object({
   currency:    z.string().default('INR'),
   email:       z.string().email('Valid email is required'),
   deviceToken: z.string().min(1, 'deviceToken is required'),
+  idempotencyKey: z.string().optional(),
 });
 
 module.exports = { purchaseSchema };

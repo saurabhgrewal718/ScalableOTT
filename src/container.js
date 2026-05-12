@@ -15,10 +15,6 @@ class AppContainer {
     });
   }
 
-  get domainEvents() {
-    return this._get('domainEvents', () => require('./infra/events'));
-  }
-
   get queueManager() {
     return this._get('queueManager', () => {
       const { redisConfig } = require('./infra/redis');
@@ -56,6 +52,7 @@ class AppContainer {
       revenue:   this.queueManager.createQueue(QUEUES.REVENUE),
       campaigns: this.queueManager.createQueue(QUEUES.CRM_CAMPAIGNS),
       heartbeat: this.queueManager.createQueue(QUEUES.HEARTBEAT),
+      eventsBus: this.queueManager.createQueue(QUEUES.DOMAIN_EVENTS),
     }));
   }
 
@@ -63,15 +60,16 @@ class AppContainer {
   get userService() {
     return this._get('userService', () => {
       const UserService = require('./services/userService');
-      return new UserService(this.userRepo, this.domainEvents);
+      // Persistent handoff: injecting queue instead of EventEmitter
+      return new UserService(this.userRepo, this.queues.eventsBus);
     });
   }
 
   get purchaseService() {
     return this._get('purchaseService', () => {
       const PurchaseService = require('./services/purchaseService');
-      // Refactored: Now only depends on repo and domain events
-      return new PurchaseService(this.purchaseRepo, this.domainEvents);
+      // Persistent handoff: injecting queue instead of EventEmitter
+      return new PurchaseService(this.purchaseRepo, this.queues.eventsBus);
     });
   }
 
@@ -79,27 +77,6 @@ class AppContainer {
     return this._get('watchService', () => {
       const WatchService = require('./services/watchService');
       return new WatchService(this.watchRepo, this.heartbeatBuffer);
-    });
-  }
-
-  // --- Observers (Lazy) ---
-  get signupObserver() {
-    return this._get('signupObserver', () => {
-      const SignupObserver = require('./observers/signupObserver');
-      return new SignupObserver(this.domainEvents, this.queues.analytics, this.queues.push, this.queues.crm);
-    });
-  }
-
-  get purchaseObserver() {
-    return this._get('purchaseObserver', () => {
-      const PurchaseObserver = require('./observers/purchaseObserver');
-      return new PurchaseObserver(
-        this.domainEvents, 
-        this.queues.push, 
-        this.queues.email, 
-        this.queues.revenue, 
-        this.queues.campaigns
-      );
     });
   }
 
@@ -140,6 +117,7 @@ class AppContainer {
       const CrmWorker = require('./workers/crmWorker');
       const RevenueWorker = require('./workers/revenueWorker');
       const HeartbeatWorker = require('./workers/heartbeatWorker');
+      const DomainEventWorker = require('./workers/domainEventWorker');
 
       return [
         new NotificationWorker(this.queueManager, this.pushClient),
@@ -148,6 +126,15 @@ class AppContainer {
         new CrmWorker(this.queueManager, this.crmClient),
         new RevenueWorker(this.queueManager, this.revenueClient),
         new HeartbeatWorker(this.queueManager, this.analyticsClient, this.watchRepo),
+        new DomainEventWorker(
+          this.queueManager,
+          this.queues.analytics,
+          this.queues.push,
+          this.queues.crm,
+          this.queues.email,
+          this.queues.revenue,
+          this.queues.campaigns
+        ),
       ];
     });
   }
@@ -161,13 +148,10 @@ class AppContainer {
 
   /**
    * Start web-side dependencies.
-   * Note: This is synchronous as all internal components use synchronous listeners/timers.
    */
   startWeb() {
-    this.signupObserver.listen();
-    this.purchaseObserver.listen();
     this.heartbeatBuffer.startFlusher();
-    console.log('[AppContainer] Web-side components started (Observers + Flusher)');
+    console.log('[AppContainer] Web-side components started (Flusher)');
   }
 
   /**

@@ -4,23 +4,26 @@ const { EVENTS } = require('../infra/constants');
 
 class UserService {
   /**
-   * @param {object} userRepo     - Repo for user DB operations.
-   * @param {object} domainEvents - Central EventEmitter for decoupled side-effects.
+   * @param {object} userRepo
+   * @param {object} domainEventQueue
    */
-  constructor(userRepo, domainEvents) {
+  constructor(userRepo, domainEventQueue) {
     this.userRepo = userRepo;
-    this.domainEvents = domainEvents;
+    this.domainEventQueue = domainEventQueue;
   }
 
   async signupUser(data) {
-    // 1. Critical path: persist the user record. This MUST succeed before
-    //    we announce anything.
-    const user = await this.userRepo.saveUser(data);
+    // 1. Critical path: persist the user record with an idempotency check.
+    const { user, isNew } = await this.userRepo.saveUser(data);
 
-    // 2. Emit the domain event fire-and-forget. The SignupObserver handles
-    //    all async side-effects (analytics, push, CRM) without blocking
-    //    the HTTP response to the caller.
-    this.domainEvents.emit(EVENTS.USER_SIGNUP, user);
+    // 2. Only emit the domain event if this is a NEW registration.
+    //    This prevents duplicate side-effects (emails, analytics) if the
+    //    client retries the request.
+    if (isNew) {
+      await this.domainEventQueue.add(EVENTS.USER_SIGNUP, user);
+    } else {
+      console.log(`[UserService] Skipping domain event for existing user=${user.userId}`);
+    }
 
     return user;
   }

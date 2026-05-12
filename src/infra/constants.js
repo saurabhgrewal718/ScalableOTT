@@ -15,6 +15,7 @@ module.exports = Object.freeze({
     EMAIL:     'emails',
     REVENUE:   'revenue_events',
     HEARTBEAT: 'heartbeat_saver_queue',
+    DOMAIN_EVENTS: 'domain_events_bus',
   },
   EVENTS: {
     USER_SIGNUP: 'user:signup',
