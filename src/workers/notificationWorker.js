@@ -1,8 +1,10 @@
 'use strict';
 
+const { QUEUES } = require('../infra/constants');
+
 class NotificationWorker {
   constructor(queueManager, pushClient) {
-    this.QUEUE_NAME = 'push_notifications';
+    this.QUEUE_NAME = QUEUES.PUSH;
     this.queueManager = queueManager;
     this.pushClient = pushClient;
   }

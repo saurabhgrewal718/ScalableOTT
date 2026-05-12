@@ -1,5 +1,7 @@
 'use strict';
 
+const { QUEUES } = require('./infra/constants');
+
 class AppContainer {
   constructor() {
     this._instances = new Map();
@@ -47,13 +49,13 @@ class AppContainer {
   // --- Queues (Lazy) ---
   get queues() {
     return this._get('queues', () => ({
-      analytics: this.queueManager.createQueue('analytics_events'),
-      push: this.queueManager.createQueue('push_notifications'),
-      crm: this.queueManager.createQueue('crm_contacts'),
-      email: this.queueManager.createQueue('emails'),
-      revenue: this.queueManager.createQueue('revenue_events'),
-      campaigns: this.queueManager.createQueue('crm_campaigns'),
-      heartbeat: this.queueManager.createQueue('heartbeat_saver_queue'),
+      analytics: this.queueManager.createQueue(QUEUES.ANALYTICS),
+      push:      this.queueManager.createQueue(QUEUES.PUSH),
+      crm:       this.queueManager.createQueue(QUEUES.CRM_CONTACTS),
+      email:     this.queueManager.createQueue(QUEUES.EMAIL),
+      revenue:   this.queueManager.createQueue(QUEUES.REVENUE),
+      campaigns: this.queueManager.createQueue(QUEUES.CRM_CAMPAIGNS),
+      heartbeat: this.queueManager.createQueue(QUEUES.HEARTBEAT),
     }));
   }
 
@@ -68,7 +70,8 @@ class AppContainer {
   get purchaseService() {
     return this._get('purchaseService', () => {
       const PurchaseService = require('./services/purchaseService');
-      return new PurchaseService(this.purchaseRepo, this.queues.push, this.queues.email, this.queues.revenue, this.queues.campaigns);
+      // Refactored: Now only depends on repo and domain events
+      return new PurchaseService(this.purchaseRepo, this.domainEvents);
     });
   }
 
@@ -84,6 +87,19 @@ class AppContainer {
     return this._get('signupObserver', () => {
       const SignupObserver = require('./observers/signupObserver');
       return new SignupObserver(this.domainEvents, this.queues.analytics, this.queues.push, this.queues.crm);
+    });
+  }
+
+  get purchaseObserver() {
+    return this._get('purchaseObserver', () => {
+      const PurchaseObserver = require('./observers/purchaseObserver');
+      return new PurchaseObserver(
+        this.domainEvents, 
+        this.queues.push, 
+        this.queues.email, 
+        this.queues.revenue, 
+        this.queues.campaigns
+      );
     });
   }
 
@@ -143,13 +159,21 @@ class AppContainer {
     return this._instances.get(key);
   }
 
-  async startWeb() {
+  /**
+   * Start web-side dependencies.
+   * Note: This is synchronous as all internal components use synchronous listeners/timers.
+   */
+  startWeb() {
     this.signupObserver.listen();
+    this.purchaseObserver.listen();
     this.heartbeatBuffer.startFlusher();
     console.log('[AppContainer] Web-side components started (Observers + Flusher)');
   }
 
-  async startWorker() {
+  /**
+   * Start background workers.
+   */
+  startWorker() {
     this.workers.forEach(w => w.start());
     console.log('[AppContainer] Worker-side components started (BullMQ Workers)');
   }

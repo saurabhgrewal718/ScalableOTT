@@ -1,8 +1,10 @@
 'use strict';
 
+const { QUEUES } = require('../infra/constants');
+
 class EmailWorker {
   constructor(queueManager, emailClient) {
-    this.QUEUE_NAME = 'emails';
+    this.QUEUE_NAME = QUEUES.EMAIL;
     this.queueManager = queueManager;
     this.emailClient = emailClient;
   }

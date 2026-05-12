@@ -1,8 +1,10 @@
 'use strict';
 
+const { QUEUES } = require('../infra/constants');
+
 class RevenueWorker {
   constructor(queueManager, revenueClient) {
-    this.QUEUE_NAME = 'revenue_events';
+    this.QUEUE_NAME = QUEUES.REVENUE;
     this.queueManager = queueManager;
     this.revenueClient = revenueClient;
   }

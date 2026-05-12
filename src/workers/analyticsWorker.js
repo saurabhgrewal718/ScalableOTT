@@ -1,12 +1,14 @@
 'use strict';
 
+const { QUEUES } = require('../infra/constants');
+
 class AnalyticsWorker {
   /**
    * @param {object} queueManager
    * @param {object} analyticsClient
    */
   constructor(queueManager, analyticsClient) {
-    this.QUEUE_NAME = 'analytics_events';
+    this.QUEUE_NAME = QUEUES.ANALYTICS;
     this.queueManager = queueManager;
     this.analyticsClient = analyticsClient;
   }

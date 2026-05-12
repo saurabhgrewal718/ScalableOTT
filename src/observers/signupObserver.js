@@ -1,6 +1,14 @@
 'use strict';
 
+const { EVENTS } = require('../infra/constants');
+
 class SignupObserver {
+  /**
+   * @param {object} domainEvents
+   * @param {object} analyticsQueue
+   * @param {object} pushQueue
+   * @param {object} crmQueue
+   */
   constructor(domainEvents, analyticsQueue, pushQueue, crmQueue) {
     this.domainEvents   = domainEvents;
     this.analyticsQueue = analyticsQueue;
@@ -9,8 +17,8 @@ class SignupObserver {
   }
 
   listen() {
-    this.domainEvents.on('user:signup', async (data) => {
-      const { userId, email, name, deviceToken, platform = 'unknown' } = data;
+    this.domainEvents.on(EVENTS.USER_SIGNUP, async (user) => {
+      const { userId, email, name, deviceToken, platform = 'unknown' } = user;
 
       console.log(`[SignupObserver] Handling side-effects for user=${userId}`);
 
@@ -36,21 +44,12 @@ class SignupObserver {
       const labels = ['analytics', 'push', 'crm'];
       results.forEach((result, i) => {
         if (result.status === 'rejected') {
-          // Log a structured error for each failed enqueue so alerting
-          // systems can detect partial failures. BullMQ retries are the
-          // first line of defence — if we can't even enqueue, it means
-          // Redis is unavailable and this needs immediate attention.
           console.error(
             `[SignupObserver] ❌ Failed to enqueue ${labels[i]} side-effect for user=${userId}:`,
             result.reason?.message
           );
         }
       });
-
-      const succeeded = results.filter((r) => r.status === 'fulfilled').length;
-      console.log(
-        `[SignupObserver] ✅ ${succeeded}/${results.length} side-effects enqueued for user=${userId}`
-      );
     });
   }
 }

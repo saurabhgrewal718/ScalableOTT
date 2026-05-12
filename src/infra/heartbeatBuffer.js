@@ -1,5 +1,7 @@
 'use strict';
 
+const { QUEUES } = require('./constants');
+
 class HeartbeatBuffer {
   /**
    * @param {object} redis - Redis instance
@@ -9,6 +11,7 @@ class HeartbeatBuffer {
     this.CIRCUIT_RESET_MS = parseInt(process.env.HEARTBEAT_CIRCUIT_RESET_MS || '60000', 10);
     this.FLUSH_INTERVAL_MS = parseInt(process.env.HEARTBEAT_FLUSH_INTERVAL_MS || '10000', 10);
     this.REDIS_KEY = 'heartbeat_buffer';
+    this.QUEUE_NAME = QUEUES.HEARTBEAT;
 
     this.redis = redis;
     this.queueManager = queueManager;

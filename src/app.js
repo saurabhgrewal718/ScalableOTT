@@ -44,9 +44,11 @@ const server = app.listen(PORT, () => {
  */
 async function shutdown() {
   console.log('[WebProcess] shutting down...');
-  await new Promise((resolve, reject) => {
-    server.close((err) => (err ? reject(err) : resolve()));
-  });
+  if (server && server.listening) {
+    await new Promise((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
   await container.shutdown();
   process.exit(0);
 }

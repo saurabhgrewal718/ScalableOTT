@@ -13,7 +13,9 @@ class PurchaseController {
     try {
       const data     = req.validated;
       const purchase = await this.purchaseService.completePurchase(data);
-      res.status(200).json({ 
+      
+      // REST convention: 201 Created for resource creation
+      res.status(201).json({ 
         status: true, 
         message: 'Purchase recorded', 
         data: { purchaseId: purchase.id } 

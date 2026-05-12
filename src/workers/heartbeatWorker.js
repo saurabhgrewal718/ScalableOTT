@@ -1,8 +1,10 @@
 'use strict';
 
+const { QUEUES } = require('../infra/constants');
+
 class HeartbeatWorker {
   constructor(queueManager, analyticsClient, watchRepo) {
-    this.QUEUE_NAME      = 'heartbeat_saver_queue';
+    this.QUEUE_NAME      = QUEUES.HEARTBEAT;
     this.queueManager    = queueManager;
     this.analyticsClient = analyticsClient;
     this.watchRepo       = watchRepo;
