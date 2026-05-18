@@ -42,9 +42,10 @@ async function retryWithBackoff(fn, {
       const jitterMs = jitter ? Math.random() * base * 0.5 : 0;
       const delay = Math.min(Math.round(base + jitterMs), maxDelayMs);
 
-      console.warn(
-        `[retryWithBackoff:${label}] attempt ${attempt}/${maxAttempts} failed: "${err.message}". ` +
-        `Retrying in ${delay}ms…`
+      const logger = require('./logger');
+      logger.warn(
+        { label, attempt, maxAttempts, delayMs: delay, err: err.message },
+        '[retryWithBackoff] attempt failed — retrying'
       );
 
       await sleep(delay);

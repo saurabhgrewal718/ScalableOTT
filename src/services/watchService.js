@@ -1,33 +1,20 @@
 'use strict';
 
 class WatchService {
-  /**
-   * @param {object} watchRepo
-   * @param {object} heartbeatBuffer
-   */
   constructor(watchRepo, heartbeatBuffer) {
     this.watchRepo = watchRepo;
     this.heartbeatBuffer = heartbeatBuffer;
   }
 
   async trackProgress({ userId, contentId, watchedSeconds, sessionId }) {
-    // High-Scale Strategy: 
-    // Instead of writing to the DB on every heartbeat (5-10s), we use a 
-    // Write-Behind buffer.
-    const result = await this.heartbeatBuffer.record({ 
-      userId, 
-      contentId, 
-      watchedSeconds, 
-      sessionId 
-    });
+    // Write-behind pattern: buffer the heartbeat in Redis only.
+    // The HeartbeatWorker drains the buffer on a periodic flush interval
+    // and persists to the DB in bulk — this is the entire point of the
+    // buffer. Writing directly to the DB here as well would double the
+    // write load and defeat the purpose of the pattern.
+    await this.heartbeatBuffer.record({ userId, contentId, watchedSeconds, sessionId });
 
-    if (result.status === 'discarded') {
-      // We don't log every discard at 10M scale (too much noise), 
-      // but we return it for the controller to decide.
-      return { status: 'skipped', reason: 'Already recorded or stale progress' };
-    }
-
-    return { status: 'success' };
+    return { status: 'buffered' };
   }
 }
 

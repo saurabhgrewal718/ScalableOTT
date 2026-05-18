@@ -4,11 +4,15 @@ const { retryWithBackoff } = require('../infra/retryWithBackoff');
 const { simulateNetwork } = require('../utils/simulation');
 
 class CrmClient {
+  constructor(logger) {
+    this.logger = logger;
+  }
+
   async createContact({ email, name, source }) {
     return retryWithBackoff(
       async () => {
         await simulateNetwork(60);
-        console.log(`[CrmClient] → contact created email=${email} source=${source}`);
+        this.logger.info({ email, source }, '[CrmClient] → contact created');
         return { success: true };
       },
       { maxAttempts: 3, baseDelayMs: 500, label: 'crm.createContact' }
@@ -19,7 +23,7 @@ class CrmClient {
     return retryWithBackoff(
       async () => {
         await simulateNetwork(45);
-        console.log(`[CrmClient] → campaign triggered userId=${userId} campaignId=${campaignId}`);
+        this.logger.info({ userId, campaignId }, '[CrmClient] → campaign triggered');
         return { success: true };
       },
       { maxAttempts: 3, baseDelayMs: 500, label: 'crm.triggerCampaign' }

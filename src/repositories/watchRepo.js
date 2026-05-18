@@ -3,7 +3,8 @@
 const { simulateDbLatency } = require('../utils/simulation');
 
 class WatchRepo {
-  constructor() {
+  constructor(logger) {
+    this.logger = logger;
     this.db = new Map();
   }
 
@@ -19,7 +20,7 @@ class WatchRepo {
       sessionId,
       updatedAt: new Date().toISOString(),
     });
-    console.log(`[WatchRepo] upsert user=${userId} content=${contentId} seconds=${watchedSeconds}`);
+    this.logger.info({ userId, contentId, watchedSeconds }, '[WatchRepo] upsert progress');
   }
 }
 

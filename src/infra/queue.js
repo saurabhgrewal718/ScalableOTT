@@ -6,8 +6,9 @@ class QueueManager {
   /**
    * @param {object} connection - Shared Redis connection object
    */
-  constructor(connection) {
+  constructor(connection, logger) {
     this.connection = connection;
+    this.logger     = logger;
     this.queues     = new Map();
     this.workers    = [];
     this.jobHistory = [];
@@ -51,8 +52,8 @@ class QueueManager {
       ...opts,
     });
 
-    w.on('completed', (job) => console.log(`[Worker:${name}] job ${job.id} completed`));
-    w.on('failed', (job, err) => console.error(`[Worker:${name}] job ${job.id} failed: ${err.message}`));
+    w.on('completed', (job) => this.logger.info({ queue: name, jobId: job.id }, '[Worker] job completed'));
+    w.on('failed', (job, err) => this.logger.error({ queue: name, jobId: job.id, err: err.message }, '[Worker] job failed'));
 
     this.workers.push(w);
     return w;
@@ -65,7 +66,7 @@ class QueueManager {
   async closeAll() {
     await Promise.all(this.workers.map(w => w.close()));
     await Promise.all(Array.from(this.queues.values()).map(q => q.close()));
-    console.log('[QueueManager] all connections closed');
+    this.logger.info('[QueueManager] all connections closed');
   }
 }
 

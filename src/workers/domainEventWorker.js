@@ -6,17 +6,12 @@ const { QUEUES, EVENTS } = require('../infra/constants');
  * DomainEventWorker
  * 
  * This is the "Engine" of our Event-Driven Architecture.
- * It consumes events from the 'domain_events_bus' and fans them out
- * to specific side-effect queues.
- * 
- * WHY: This replaces the in-memory EventEmitter. By moving the "Observer" 
- * logic into a background worker, we ensure that side-effects are never 
- * lost if the web server restarts.
  */
 class DomainEventWorker {
-  constructor(queueManager, analyticsQueue, pushQueue, crmQueue, emailQueue, revenueQueue, campaignQueue) {
+  constructor(queueManager, analyticsQueue, pushQueue, crmQueue, emailQueue, revenueQueue, campaignQueue, logger) {
     this.QUEUE_NAME = QUEUES.DOMAIN_EVENTS;
     this.queueManager = queueManager;
+    this.logger = logger;
     
     // Sub-queues for fan-out
     this.analyticsQueue = analyticsQueue;
@@ -25,11 +20,18 @@ class DomainEventWorker {
     this.emailQueue = emailQueue;
     this.revenueQueue = revenueQueue;
     this.campaignQueue = campaignQueue;
+
+    // Configurable via .env
+    this.CONCURRENCY = parseInt(process.env.DOMAIN_EVENTS_CONCURRENCY || '10', 10);
   }
 
   start() {
-    this.queueManager.createWorker(this.QUEUE_NAME, this.process.bind(this));
-    console.log(`[DomainEventWorker] Listening on ${this.QUEUE_NAME}...`);
+    this.queueManager.createWorker(
+      this.QUEUE_NAME, 
+      this.process.bind(this),
+      { concurrency: this.CONCURRENCY }
+    );
+    this.logger.info({ queue: this.QUEUE_NAME, concurrency: this.CONCURRENCY }, '[DomainEventWorker] listening');
   }
 
   async process(job) {
@@ -45,13 +47,13 @@ class DomainEventWorker {
         break;
 
       default:
-        console.warn(`[DomainEventWorker] Unknown event type: ${name}`);
+        this.logger.warn({ eventName: name }, '[DomainEventWorker] unknown event type');
     }
   }
 
   async handleUserSignup(user) {
     const { userId, email, name, deviceToken, platform = 'unknown' } = user;
-    console.log(`[DomainEventWorker] Fanning out side-effects for signup: ${userId}`);
+    this.logger.info({ userId }, '[DomainEventWorker] fanning out side-effects for signup');
 
     await Promise.allSettled([
       this.analyticsQueue.add('user_signup', { userId, event: 'signup', platform }),
@@ -70,8 +72,8 @@ class DomainEventWorker {
   }
 
   async handlePurchaseCompleted(data) {
-    const { purchase, userId, planId, amount, currency, email, deviceToken } = data;
-    console.log(`[DomainEventWorker] Fanning out side-effects for purchase: ${purchase.id}`);
+    const { purchase, userId, planId, amount, currency, email, deviceToken, idempotencyKey } = data;
+    this.logger.info({ purchaseId: purchase.id, userId }, '[DomainEventWorker] fanning out side-effects for purchase');
 
     await Promise.allSettled([
       this.pushQueue.add('purchase_push', {
@@ -91,6 +93,7 @@ class DomainEventWorker {
         amount,
         currency,
         event: 'subscription_purchase',
+        idempotencyKey,
       }),
       this.campaignQueue.add('trigger_campaign', {
         userId,

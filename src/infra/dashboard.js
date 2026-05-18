@@ -23,9 +23,10 @@ function setupDashboard(app, queueManager) {
     serverAdapter: serverAdapter,
   });
 
+  const logger = require('./logger');
   app.use(dashboardPath, serverAdapter.getRouter());
 
-  console.log(`[dashboard] BullBoard mounted at ${dashboardPath}`);
+  logger.info({ path: dashboardPath }, '[dashboard] BullBoard mounted');
 
   return { addQueue, setQueues };
 }
